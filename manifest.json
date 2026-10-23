@@ -1,0 +1,13 @@
+{
+  "name": "Coach Tukiki",
+  "short_name": "Coach Tukiki",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#F7F2E9",
+  "theme_color": "#F7F2E9",
+  "lang": "it",
+  "icons": [
+    { "src": "img/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "img/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
