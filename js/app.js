@@ -73,6 +73,8 @@
 
   /* ---------- Router ---------- */
   const routes = [];
+  const PUBLIC = ['/privacy', '/condizioni'];
+  let signingUp = false; // durante la registrazione le condizioni sono appena state accettate
   const route = (re, fn) => routes.push({ re, fn });
   let cleanup = null;
   function parseHash() {
@@ -83,10 +85,12 @@
   async function render() {
     if (cleanup) { try { cleanup(); } catch (e) {} cleanup = null; }
     const { path, q } = parseHash();
-    if (!S.user && path !== '/accedi') { location.replace('#/accedi'); return; }
+    const pub = PUBLIC.includes(path);
+    if (!S.user && path !== '/accedi' && !pub) { location.replace('#/accedi'); return; }
     if (S.user && path === '/accedi') { location.replace('#/'); return; }
     document.body.classList.toggle('logged-out', !S.user);
     renderChrome(path);
+    if (S.user && !pub && !signingUp && S.user.termsVersion !== Legal.version) { termsGate(); window.scrollTo(0, 0); return; }
     for (const r of routes) {
       const m = path.match(r.re);
       if (m) {
@@ -107,6 +111,35 @@
   window.addEventListener('hashchange', render);
 
   const demoNotice = () => S.mode === 'local' ? '<div class="notice"><b>Versione di prova.</b> I dati restano salvati solo su questo dispositivo. Quando l\'app sarà online, tutti gli allenatori condivideranno gli esercizi.</div>' : '';
+
+  /* ================= PRIVACY E CONDIZIONI ================= */
+  const legalLinks = () => '<p class="small muted legal-links"><a href="#/privacy">Privacy</a> · <a href="#/condizioni">Condizioni d\'uso</a></p>';
+  const legalPage = (html) => {
+    const back = S.user ? '#/profilo' : '#/accedi';
+    app.innerHTML = `<a class="backlink" href="${back}">${I.back} Indietro</a><article class="card legal">${html}</article>`;
+  };
+  route(/^\/privacy$/, async () => legalPage(Legal.privacy()));
+  route(/^\/condizioni$/, async () => legalPage(Legal.terms()));
+
+  // chi si è registrato prima delle condizioni (o dopo una loro modifica) le accetta qui
+  function termsGate() {
+    app.innerHTML = `
+      <div class="auth-wrap">
+        <h1>Prima di continuare</h1>
+        <form id="tg" class="card">
+          <p>Abbiamo scritto l'<a href="#/privacy">informativa sulla privacy</a> e le <a href="#/condizioni">condizioni d'uso</a> di Coach Tukiki. Leggile e conferma per continuare.</p>
+          <p class="small">In breve: le tue squadre e le tue note le vedi solo tu, gli esercizi che crei li vedono tutti gli allenatori. <b>Non scrivere mai informazioni sulla salute dei ragazzi</b> e usa solo nomi o iniziali.</p>
+          <label class="check"><input type="checkbox" name="ok" required><span>Ho letto l'informativa sulla privacy e accetto le condizioni d'uso. Sono maggiorenne.</span></label>
+          <button class="btn green block" type="submit">Continua</button>
+        </form>
+        <button class="btn light block" id="out" type="button">Esci</button>
+      </div>`;
+    $('#tg').onsubmit = async (ev) => {
+      ev.preventDefault();
+      try { await S.acceptTerms(Legal.version); render(); } catch (e) { UI.alert(errText(e)); }
+    };
+    $('#out').onclick = async () => { await S.signOut(); invalidate('exercises', 'teams', 'sessions'); location.hash = '#/accedi'; };
+  }
 
   /* ================= ACCESSO ================= */
   route(/^\/accedi$/, async () => {
@@ -134,8 +167,10 @@
           <label class="field"><span>Nome utente</span><input name="user" type="text" autocomplete="username" autocapitalize="off" placeholder="Es. giulia.rossi" required></label>
           <label class="field"><span>Email <em>(consigliata, serve per recuperare la password)</em></span><input name="email" type="email" autocomplete="email"></label>
           <label class="field"><span>Password <em>(almeno 6 caratteri)</em></span><input name="pw" type="password" autocomplete="new-password" required minlength="6"></label>
+          <label class="check"><input type="checkbox" name="terms" required><span>Ho letto l'<a href="#/privacy">informativa sulla privacy</a> e accetto le <a href="#/condizioni">condizioni d'uso</a>. Sono maggiorenne.</span></label>
           <button class="btn green block" type="submit">Crea il mio account</button>
         </form>`}
+        ${legalLinks()}
       </div>`;
       $$('[data-tab]').forEach((b) => b.onclick = () => { tab = b.dataset.tab; draw(); });
       const f = $('#f');
@@ -144,7 +179,10 @@
         const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Un momento…';
         try {
           if (tab === 'login') await S.signIn(f.id.value, f.pw.value);
-          else await S.signUp({ name: f.name.value, username: f.user.value, email: f.email.value, password: f.pw.value });
+          else {
+            signingUp = true;
+            try { await S.signUp({ name: f.name.value, username: f.user.value, email: f.email.value, password: f.pw.value, termsVersion: Legal.version }); } finally { signingUp = false; }
+          }
           invalidate('exercises', 'teams', 'sessions');
           if (location.hash === '#/') render(); else location.hash = '#/';
         } catch (e) { draw(errText(e)); }
@@ -382,6 +420,7 @@
         <label class="field"><span>Nome della squadra</span><input name="name" type="text" required value="${esc(t.name)}" placeholder="Es. Tukiki Lunedì"></label>
         <label class="field"><span>Gruppo o categoria <em>(facoltativo)</em></span><input name="group" type="text" value="${esc(t.group)}" placeholder="Es. Calcio integrato, Under 14…"></label>
         <label class="field"><span>Note sulla squadra <em>(facoltativo)</em></span><textarea name="notes" placeholder="Es. orari, campo, cose da ricordare sul gruppo">${esc(t.notes)}</textarea></label>
+        <p class="small muted privacy-hint">Per proteggere i ragazzi: usa solo nomi o iniziali e non scrivere informazioni sulla salute.</p>
         <button class="btn green block" type="submit">Salva squadra</button>
       </form>`, (root, close) => {
       const f = $('#tf', root);
@@ -550,7 +589,7 @@
 
       <div class="card notes-box" style="margin-top:18px">
         <h3>Le mie note personali</h3>
-        <p class="small muted">Visibili solo a te. Es. presenze, com'è andata, cosa riprovare.</p>
+        <p class="small muted">Visibili solo a te. Es. presenze, com'è andata, cosa riprovare. Usa solo nomi o iniziali e non scrivere informazioni sulla salute dei ragazzi.</p>
         <textarea id="notes" rows="5" placeholder="Scrivi qui…">${esc(s.notes || '')}</textarea>
       </div>
 
@@ -779,7 +818,45 @@
       <div class="facts"><div><b>${ts.length}</b><span>squadre</span></div><div><b>${ss.length}</b><span>allenamenti</span></div><div><b>${myEx}</b><span>miei esercizi</span></div></div>
       ${demoNotice()}
       <button class="btn danger block" id="out">Esci</button>
-      <p class="small muted" style="text-align:center;margin-top:24px">Coach Tukiki · fatto con il sorriso per gli allenatori Tukiki :)</p>`;
+      <div class="card flat" style="margin-top:22px">
+        <h3>I miei dati</h3>
+        <p class="small muted">Puoi scaricare una copia di tutto quello che hai salvato, oppure eliminare il tuo account.</p>
+        <div class="row">
+          <button type="button" class="btn light grow" id="export">Scarica i miei dati</button>
+          <button type="button" class="btn danger grow" id="del">Elimina il mio account</button>
+        </div>
+      </div>
+      ${legalLinks()}
+      <p class="small muted" style="text-align:center;margin-top:8px">Coach Tukiki · fatto con il sorriso per gli allenatori Tukiki :)</p>`;
+    $('#export').onclick = async () => {
+      try {
+        const data = await S.exportData();
+        const blob = new Blob([JSON.stringify(Object.assign({ app: 'Coach Tukiki', scaricatoIl: new Date().toISOString() }, data), null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob); a.download = `coach-tukiki-${S.user.username || 'dati'}.json`;
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      } catch (e) { UI.alert(errText(e)); }
+    };
+    $('#del').onclick = () => modal('Elimina il mio account', `
+      <form id="df">
+        <p>Verranno cancellati per sempre il tuo account, le tue squadre, i tuoi allenamenti e le tue note. Non si può tornare indietro.</p>
+        ${myEx ? `<label class="check"><input type="checkbox" name="keep" checked><span>Lascia i miei ${myEx} esercizi nella libreria degli altri allenatori, senza il mio nome</span></label>` : ''}
+        <label class="field"><span>Per confermare, scrivi la tua password</span><input name="pw" type="password" autocomplete="current-password" required></label>
+        <button class="btn danger block" type="submit">Elimina per sempre</button>
+      </form>`, (root, close) => {
+      const f = $('#df', root);
+      f.onsubmit = async (ev) => {
+        ev.preventDefault();
+        const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Un momento…';
+        try {
+          await S.deleteAccount({ password: f.pw.value, keepExercises: !!(f.keep && f.keep.checked) });
+          close(); invalidate('exercises', 'teams', 'sessions');
+          location.hash = '#/accedi';
+          UI.alert('Il tuo account è stato eliminato. Grazie per aver allenato con noi!');
+        } catch (e) { btn.disabled = false; btn.textContent = 'Elimina per sempre'; UI.alert(errText(e)); }
+      };
+    });
     $('#pf').onsubmit = async (ev) => { ev.preventDefault(); try { await S.updateProfile({ name: ev.target.name.value.trim() }); toast('Salvato!'); render(); } catch (e) { UI.alert(errText(e)); } };
     $('#out').onclick = async () => { await S.signOut(); invalidate('exercises', 'teams', 'sessions'); location.hash = '#/accedi'; };
   });
@@ -791,10 +868,11 @@
       app.innerHTML = '<div class="error-msg">Non riesco a collegarmi. Controlla la connessione internet e ricarica la pagina.</div>';
       return;
     }
-    let lastUid = S.user ? S.user.uid : null;
+    let lastUid = S.user ? S.user.uid : null, lastTerms = S.user ? S.user.termsVersion : null;
     S.onAuth((u) => {
-      const id = u ? u.uid : null;
-      if (id !== lastUid) { lastUid = id; invalidate('exercises', 'teams', 'sessions'); render(); }
+      const id = u ? u.uid : null, terms = u ? u.termsVersion : null;
+      if (id !== lastUid) { lastUid = id; lastTerms = terms; invalidate('exercises', 'teams', 'sessions'); render(); }
+      else if (terms !== lastTerms) { lastTerms = terms; render(); }
     });
     render();
   })();
