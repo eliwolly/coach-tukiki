@@ -20,7 +20,7 @@
       <h2>2. Quali dati usiamo</h2>
       <ul>
         <li><b>Dati dell'account:</b> nome e cognome, nome utente, email (facoltativa) e password. La password è salvata in forma cifrata: nessuno, nemmeno l'associazione, può leggerla.</li>
-        <li><b>Quello che scrivi nell'app:</b> squadre, allenamenti, note personali ed esercizi che crei.</li>
+        <li><b>Quello che scrivi nell'app:</b> squadre, allenamenti, note ed esercizi che crei, e gli allenatori con cui condividi una squadra.</li>
         <li><b>Dati tecnici:</b> quando usi il sito, i fornitori del servizio (vedi punto 5) registrano per sicurezza dati come l'indirizzo IP e l'ora di accesso.</li>
       </ul>
 
@@ -36,14 +36,14 @@
       <h2>4. Perché usiamo i dati</h2>
       <ul>
         <li>Per farti usare l'app (creare l'account, salvare squadre, allenamenti ed esercizi): è necessario per darti il servizio che chiedi registrandoti (art. 6.1.b GDPR).</li>
-        <li>Per mostrare agli altri allenatori il tuo nome accanto agli esercizi che condividi (art. 6.1.b GDPR).</li>
+        <li>Per mostrare agli altri allenatori il tuo nome accanto agli esercizi che condividi e nelle squadre in cui allenate insieme (art. 6.1.b GDPR).</li>
         <li>Per la sicurezza del sito e per evitare abusi: legittimo interesse dell'associazione (art. 6.1.f GDPR).</li>
       </ul>
       <p>Non usiamo i dati per pubblicità, non li vendiamo e non creiamo profili.</p>
 
       <h2>5. Chi può vedere i dati</h2>
       <ul>
-        <li>Le tue squadre, i tuoi allenamenti e le tue note li vedi <b>solo tu</b>.</li>
+        <li>Le tue squadre, i tuoi allenamenti e le tue note li vedi <b>solo tu</b> e gli allenatori che inviti nella squadra. Se ti invitano in una squadra, gli altri allenatori vedono il tuo nome utente e le modifiche che fai.</li>
         <li>Gli esercizi che crei, con il tuo nome, li vedono <b>tutti gli allenatori registrati</b>.</li>
         <li><b>Google (Firebase)</b> conserva account e dati per conto dell'associazione, come responsabile del trattamento (art. 28 GDPR).</li>
         <li><b>GitHub</b> (servizio GitHub Pages) pubblica il sito e può registrare dati tecnici delle visite.</li>
@@ -60,7 +60,7 @@
       <p>Puoi chiedere in ogni momento di vedere, correggere, scaricare o cancellare i tuoi dati, limitarne l'uso o opporti (artt. 15-22 GDPR). Molte cose le puoi fare da solo, dalla pagina <a href="#/profilo">Il mio profilo</a>:</p>
       <ul>
         <li><b>Scarica i miei dati</b>: un file con tutto quello che hai salvato;</li>
-        <li><b>Elimina il mio account</b>: cancella account, squadre, allenamenti e note.</li>
+        <li><b>Elimina il mio account</b>: cancella account, squadre, allenamenti e note. Dalle squadre di altri allenatori esci, e i loro allenamenti restano a loro.</li>
       </ul>
       <p>Per tutto il resto scrivi a ${mail()}. Se pensi che i tuoi dati non siano trattati correttamente puoi presentare reclamo al Garante per la protezione dei dati personali (<a href="https://www.garanteprivacy.it" target="_blank" rel="noopener">garanteprivacy.it</a>).</p>
 
@@ -88,22 +88,28 @@
         <li>Pubblica solo esercizi tuoi o che hai il diritto di condividere: non copiare testi, disegni o immagini da libri, siti o app di altri.</li>
         <li>Condividendo un esercizio permetti gratuitamente agli altri allenatori e all'associazione di usarlo, copiarlo e adattarlo per gli allenamenti.</li>
         <li>Non scrivere negli esercizi nomi o informazioni sugli atleti, né contenuti offensivi.</li>
+      </ul>
+
+      <h2>5. Squadre condivise</h2>
+      <ul>
+        <li>Chi crea una squadra può invitare altri allenatori con il loro nome utente. Tutti gli allenatori della squadra vedono e modificano i suoi allenamenti e le note.</li>
+        <li>Invita solo allenatori che seguono davvero quella squadra. Chi ha creato la squadra può togliere un allenatore; chi è stato invitato può uscire quando vuole.</li>
         <li>Sei responsabile di ciò che scrivi. L'associazione può modificare o togliere contenuti non adatti.</li>
       </ul>
 
-      <h2>5. Sicurezza in campo</h2>
+      <h2>6. Sicurezza in campo</h2>
       <p>Gli esercizi sono spunti. Prima di proporli, l'allenatore valuta se sono adatti all'età, alle capacità e alle condizioni dei propri atleti, del campo e del materiale, e li adatta se serve. L'associazione non risponde dell'uso degli esercizi in modo non adatto, nei limiti previsti dalla legge.</p>
 
-      <h2>6. Disponibilità</h2>
+      <h2>7. Disponibilità</h2>
       <p>L'app è offerta così com'è, senza garanzia che sia sempre disponibile o priva di errori. Può cambiare o essere interrotta. Per gli allenamenti importanti scarica il PDF.</p>
 
-      <h2>7. Eliminare l'account</h2>
+      <h2>8. Eliminare l'account</h2>
       <p>Puoi eliminare il tuo account in ogni momento da <a href="#/profilo">Il mio profilo</a>. Puoi scegliere se lasciare i tuoi esercizi nella libreria comune, senza il tuo nome, o cancellarli.</p>
 
-      <h2>8. Modifiche</h2>
+      <h2>9. Modifiche</h2>
       <p>Se queste condizioni cambiano, te lo chiederemo al prossimo accesso.</p>
 
-      <h2>9. Legge applicabile</h2>
+      <h2>10. Legge applicabile</h2>
       <p>Si applica la legge italiana. Per i dati personali vale l'<a href="#/privacy">informativa sulla privacy</a>.</p>
       <p>Per domande: ${mail()}.</p>`;
   }

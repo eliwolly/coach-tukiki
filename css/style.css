@@ -360,3 +360,8 @@ label.check input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; acce
 .legal ul { padding-left: 1.2em; margin: 0 0 .8em; }
 .legal li { margin-bottom: .4em; }
 .legal mark { background: #FFE9A8; padding: 0 3px; border-radius: 4px; }
+
+/* allenatori della squadra */
+.coaches .coach { padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: nowrap; }
+.coaches .coach em { font-style: normal; }
+.avatar.sm { width: 32px; height: 32px; font-size: .78rem; flex: none; }

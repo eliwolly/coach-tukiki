@@ -29,18 +29,39 @@ service cloud.firestore {
       allow delete: if signedIn() && resource.data.authorId == request.auth.uid;
     }
 
-    // Squadre e allenamenti: privati di ogni allenatore
+    // Squadre: le vede e le modifica chi le ha create e gli allenatori invitati (members).
+    // Solo chi l'ha creata invita o toglie allenatori ed elimina la squadra; chi è invitato può uscire.
+    function member(d) { return request.auth.uid == d.ownerId || request.auth.uid in d.get('members', []); }
     match /teams/{id} {
-      allow read, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
-      allow update: if signedIn() && resource.data.ownerId == request.auth.uid
-                    && request.resource.data.ownerId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow read: if signedIn() && member(resource.data);
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid
+                    && request.resource.data.members == [request.auth.uid];
+      allow update: if signedIn() && request.resource.data.ownerId == resource.data.ownerId && (
+                      resource.data.ownerId == request.auth.uid
+                      || (request.auth.uid in resource.data.get('members', [])
+                          && request.resource.data.members == resource.data.members)
+                      || (request.auth.uid in resource.data.get('members', [])
+                          && request.resource.data.members == resource.data.members.removeAll([request.auth.uid])
+                          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members', 'memberNames'])));
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+    }
+
+    // Allenamenti: li vedono e modificano gli allenatori della loro squadra.
+    // L'elenco members deve coincidere con quello della squadra (o essere solo chi l'ha creato).
+    function teamMembers(tid) { return get(/databases/$(database)/documents/teams/$(tid)).data.members; }
+    function validMembers() {
+      return request.resource.data.members == [request.resource.data.ownerId]
+        || (request.resource.data.teamId is string && request.resource.data.teamId != ''
+            && request.resource.data.members == teamMembers(request.resource.data.teamId));
     }
     match /sessions/{id} {
-      allow read, delete: if signedIn() && resource.data.ownerId == request.auth.uid;
-      allow update: if signedIn() && resource.data.ownerId == request.auth.uid
-                    && request.resource.data.ownerId == request.auth.uid;
-      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow read, delete: if signedIn() && member(resource.data);
+      // chi esce dalla squadra lascia i suoi allenamenti a chi l'ha creata
+      allow update: if signedIn() && member(resource.data) && validMembers()
+                    && (request.resource.data.ownerId == resource.data.ownerId
+                        || request.resource.data.ownerId == get(/databases/$(database)/documents/teams/$(request.resource.data.teamId)).data.ownerId);
+      allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid && validMembers()
+                    && request.auth.uid in request.resource.data.members;
     }
   }
 }

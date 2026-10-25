@@ -407,7 +407,8 @@
       <div class="row between" style="margin-bottom:12px"><h1 style="margin:0">Le mie squadre</h1><button class="btn green small" id="new">${I.plus} Nuova</button></div>
       ${ts.length ? ts.map((t) => {
         const n = ss.filter((s) => s.teamId === t.id).length;
-        return `<a class="list-item" href="#/squadra/${t.id}"><div class="ico">${esc(initials(t.name))}</div><div class="grow"><div class="t">${esc(t.name)}</div><div class="s">${esc(t.group || '')}${t.group ? ' · ' : ''}${n} allenament${n === 1 ? 'o' : 'i'}</div></div>${I.chev}</a>`;
+        const co = (t.members || []).length - 1;
+        return `<a class="list-item" href="#/squadra/${t.id}"><div class="ico">${esc(initials(t.name))}</div><div class="grow"><div class="t">${esc(t.name)}</div><div class="s">${esc(t.group || '')}${t.group ? ' · ' : ''}${n} allenament${n === 1 ? 'o' : 'i'}${co > 0 ? ` · condivisa con ${co} allenator${co === 1 ? 'e' : 'i'}` : ''}</div></div>${I.chev}</a>`;
       }).join('') : '<div class="empty">Non hai ancora squadre.<br>Crea la prima per salvare lo storico degli allenamenti.</div>'}`;
     $('#new').onclick = () => teamModal();
     if (q.get('nuova')) teamModal();
@@ -441,6 +442,7 @@
     const t = ts.find((x) => x.id === m[1]);
     if (!t) { app.innerHTML = '<div class="empty">Squadra non trovata.</div>'; return; }
     const list = ss.filter((s) => s.teamId === t.id);
+    const owner = t.ownerId === S.user.uid;
     const totalMin = list.reduce((a, s) => a + sessionMinutes(s), 0);
     app.innerHTML = `
       <a class="backlink" href="#/squadre">${I.back} Squadre</a>
@@ -451,8 +453,34 @@
       <a class="btn green block" href="#/allenamento/nuovo?squadra=${t.id}">${I.plus} Nuovo allenamento</a>
       <div class="section-title"><h2>Storico allenamenti</h2></div>
       ${list.length ? list.map((s) => sessionItem(s, t.group || t.name)).join('') : '<div class="empty">Nessun allenamento salvato per questa squadra.</div>'}
-      <div class="row" style="margin-top:24px"><button class="btn light grow" id="edit">Modifica</button><button class="btn danger grow" id="del">Elimina</button></div>`;
+      <div class="card flat coaches" style="margin-top:24px">
+        <h3>Allenatori della squadra</h3>
+        <p class="small muted">Tutti gli allenatori della squadra vedono e modificano i suoi allenamenti e le loro note.</p>
+        ${(t.members || [S.user.uid]).map((u) => `<div class="row coach">
+          <span class="avatar sm">${esc(initials((t.memberNames || {})[u] || '?'))}</span>
+          <span class="grow">${esc((t.memberNames || {})[u] || 'allenatore')}${u === S.user.uid ? ' <em class="muted">(tu)</em>' : ''}${u === t.ownerId ? ' <em class="muted">· ha creato la squadra</em>' : ''}</span>
+          ${owner && u !== S.user.uid ? `<button type="button" class="iconbtn" data-remove="${esc(u)}" aria-label="Togli ${esc((t.memberNames || {})[u] || 'allenatore')}">${I.x}</button>` : ''}
+        </div>`).join('')}
+        ${owner ? `<button type="button" class="btn light block" id="invite" style="margin-top:10px">${I.plus} Invita un allenatore</button>` : ''}
+      </div>
+      <div class="row" style="margin-top:16px"><button class="btn light grow" id="edit">Modifica</button>${owner ? '<button class="btn danger grow" id="del">Elimina</button>' : '<button class="btn danger grow" id="leave">Esci dalla squadra</button>'}</div>`;
     $('#edit').onclick = () => teamModal(t);
+    const inv = $('#invite');
+    if (inv) inv.onclick = async () => {
+      const u = await UI.prompt('Scrivi il nome utente dell\'allenatore da invitare (lo trova in "Il mio profilo"). Potrà vedere e modificare gli allenamenti di questa squadra.');
+      if (!u) return;
+      try { await S.inviteToTeam(t.id, u); invalidate('teams', 'sessions'); toast('Allenatore aggiunto!'); render(); } catch (err) { UI.alert(errText(err)); }
+    };
+    $$('[data-remove]').forEach((b) => b.onclick = async () => {
+      const name = (t.memberNames || {})[b.dataset.remove] || 'questo allenatore';
+      if (!await UI.confirm(`Togliere ${name} dalla squadra? Non vedrà più i suoi allenamenti.`, 'Togli', true)) return;
+      try { await S.removeFromTeam(t.id, b.dataset.remove); invalidate('teams', 'sessions'); toast('Fatto'); render(); } catch (err) { UI.alert(errText(err)); }
+    });
+    const lv = $('#leave');
+    if (lv) lv.onclick = async () => {
+      if (!await UI.confirm(`Uscire dalla squadra "${t.name}"? Non vedrai più i suoi allenamenti, che resteranno agli altri allenatori.`, 'Esci', true)) return;
+      try { await S.removeFromTeam(t.id, S.user.uid); invalidate('teams', 'sessions'); toast('Sei uscito dalla squadra'); location.hash = '#/squadre'; } catch (err) { UI.alert(errText(err)); }
+    };
     $('#del').onclick = async () => {
       if (!await UI.confirm(`Eliminare la squadra "${t.name}" e tutti i suoi ${list.length} allenamenti? Non si può annullare.`, 'Elimina', true)) return;
       try { await S.deleteTeam(t.id); invalidate('teams', 'sessions'); toast('Squadra eliminata'); location.hash = '#/squadre'; } catch (err) { UI.alert(errText(err)); }
@@ -492,6 +520,7 @@
       s = JSON.parse(JSON.stringify(s));
     }
     if (!s.blocks) s.blocks = [];
+    const shared = ((ts.find((t) => t.id === s.teamId) || {}).members || []).length > 1;
 
     let saveTimer = null, saving = Promise.resolve(), dirty = false;
     const status = (txt) => { const el = $('#savestate'); if (el) el.textContent = txt; };
@@ -566,7 +595,7 @@
 
     app.innerHTML = `
       <a class="backlink" href="${s.teamId ? '#/squadra/' + s.teamId : '#/allenamenti'}">${I.back} Indietro</a>
-      <div class="row between"><h1 style="margin:0">${m[1] === 'nuovo' ? 'Nuovo allenamento' : 'Allenamento'}</h1><span class="small muted" id="savestate"></span></div>
+      <div class="row between"><h1 style="margin:0">${m[1] === 'nuovo' ? 'Nuovo allenamento' : 'Allenamento'}</h1><span class="small muted" id="savestate">${shared && s.updatedByName ? 'Ultima modifica: ' + esc(s.updatedByName) : ''}</span></div>
       <p class="small muted">Le modifiche si salvano da sole.</p>
       ${!ts.length ? `<div class="notice">Per salvare l'allenamento serve una squadra. <a href="#/squadre?nuova=1">Creala ora</a>.</div>` : ''}
       <div class="card">
@@ -588,8 +617,8 @@
       <input type="file" id="importfile" accept=".docx,.pdf,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden>
 
       <div class="card notes-box" style="margin-top:18px">
-        <h3>Le mie note personali</h3>
-        <p class="small muted">Visibili solo a te. Es. presenze, com'è andata, cosa riprovare. Usa solo nomi o iniziali e non scrivere informazioni sulla salute dei ragazzi.</p>
+        <h3>${shared ? 'Note dell\'allenamento' : 'Le mie note personali'}</h3>
+        <p class="small muted">${shared ? 'Visibili a te e agli altri allenatori della squadra.' : 'Visibili solo a te.'} Es. presenze, com'è andata, cosa riprovare. Usa solo nomi o iniziali e non scrivere informazioni sulla salute dei ragazzi.</p>
         <textarea id="notes" rows="5" placeholder="Scrivi qui…">${esc(s.notes || '')}</textarea>
       </div>
 
@@ -600,7 +629,7 @@
       ${s.id ? '<button type="button" class="btn danger block" id="del" style="margin-top:10px">Elimina allenamento</button>' : ''}
 
       <div class="total-bar"><span id="total"></span><button type="button" class="btn green small" id="add2">${I.plus} Esercizio</button></div>`;
-    status(s.id ? 'Salvato ✓' : '');
+    if (!(shared && s.updatedByName)) status(s.id ? 'Salvato ✓' : '');
     drawBlocks();
 
     const bindField = (sel, key, fn) => { const el = $(sel); el.oninput = el.onchange = () => { s[key] = el.value; if (fn) fn(); scheduleSave(); }; };
@@ -811,7 +840,7 @@
       <div class="card">
         <form id="pf">
           <label class="field"><span>Nome</span><input name="name" type="text" value="${esc(S.user.name)}"></label>
-          <p class="small muted">Nome utente: <b>${esc(S.user.username)}</b>${S.user.email ? `<br>Email: <b>${esc(S.user.email)}</b>` : ''}</p>
+          <p class="small muted">Nome utente: <b>${esc(S.user.username)}</b> <em>(dallo agli altri allenatori per farti invitare nelle loro squadre)</em>${S.user.email ? `<br>Email: <b>${esc(S.user.email)}</b>` : ''}</p>
           <button class="btn light" type="submit">Salva nome</button>
         </form>
       </div>
@@ -841,6 +870,7 @@
     $('#del').onclick = () => modal('Elimina il mio account', `
       <form id="df">
         <p>Verranno cancellati per sempre il tuo account, le tue squadre, i tuoi allenamenti e le tue note. Non si può tornare indietro.</p>
+        <p class="small muted">Le squadre che hai creato spariranno anche per gli allenatori che hai invitato. Dalle squadre di altri allenatori uscirai, e i loro allenamenti resteranno a loro.</p>
         ${myEx ? `<label class="check"><input type="checkbox" name="keep" checked><span>Lascia i miei ${myEx} esercizi nella libreria degli altri allenatori, senza il mio nome</span></label>` : ''}
         <label class="field"><span>Per confermare, scrivi la tua password</span><input name="pw" type="password" autocomplete="current-password" required></label>
         <button class="btn danger block" type="submit">Elimina per sempre</button>

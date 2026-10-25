@@ -106,10 +106,11 @@
       return this._put('exercises', doc);
     },
     async deleteExercise(id) { this._del('exercises', id); },
-    async listTeams() { return Object.values(this._all('teams')).filter((t) => t.ownerId === this.user.uid); },
+    _isMine(d) { return d.ownerId === this.user.uid || (d.members || []).includes(this.user.uid); },
+    async listTeams() { return Object.values(this._all('teams')).filter((t) => this._isMine(t)); },
     async saveTeam(t) {
       const doc = Object.assign({}, t);
-      if (!doc.id) { doc.id = uid(); doc.createdAt = now(); doc.ownerId = this.user.uid; }
+      if (!doc.id) { doc.id = uid(); doc.createdAt = now(); doc.ownerId = this.user.uid; doc.members = [this.user.uid]; doc.memberNames = { [this.user.uid]: this.user.username }; }
       doc.updatedAt = now();
       return this._put('teams', doc);
     },
@@ -117,14 +118,18 @@
       this._del('teams', id);
       Object.values(this._all('sessions')).filter((s) => s.teamId === id && s.ownerId === this.user.uid).forEach((s) => this._del('sessions', s.id));
     },
-    async listSessions() { return Object.values(this._all('sessions')).filter((s) => s.ownerId === this.user.uid); },
+    async listSessions() { return Object.values(this._all('sessions')).filter((s) => this._isMine(s)); },
     async saveSession(s) {
       const doc = Object.assign({}, s);
       if (!doc.id) { doc.id = uid(); doc.createdAt = now(); doc.ownerId = this.user.uid; }
-      doc.updatedAt = now();
+      const team = this._all('teams')[doc.teamId];
+      doc.members = team && team.members ? team.members : [doc.ownerId];
+      doc.updatedAt = now(); doc.updatedByName = this.user.name || this.user.username;
       return this._put('sessions', doc);
     },
     async deleteSession(id) { this._del('sessions', id); },
+    async inviteToTeam() { throw new AppError('Nella versione di prova non si possono invitare altri allenatori.'); },
+    async removeFromTeam() { throw new AppError('Nella versione di prova non si possono condividere le squadre.'); },
   };
 
   /* ================= MODALITÀ FIREBASE ================= */
@@ -260,8 +265,10 @@
       const me = this.user.uid, username = this.user.username;
       const [ss, ts, exs] = await Promise.all([this.listSessions(), this.listTeams(), this._mine('exercises', 'authorId')]);
       try {
-        await Promise.all(ss.map((x) => this.db.collection('sessions').doc(x.id).delete()));
-        await Promise.all(ts.map((x) => this.db.collection('teams').doc(x.id).delete()));
+        // squadre mie: cancellate con i loro allenamenti; squadre di altri: esco e lascio a loro gli allenamenti
+        for (const t of ts) { if (t.ownerId === me) await this.deleteTeam(t.id); else await this.removeFromTeam(t.id, me); }
+        const handled = new Set(ts.map((t) => t.id));
+        await Promise.all(ss.filter((x) => !handled.has(x.teamId) && x.ownerId === me).map((x) => this.db.collection('sessions').doc(x.id).delete()));
         await Promise.all(exs.map((x) => keepExercises
           ? this.db.collection('exercises').doc(x.id).update({ authorName: ANON_AUTHOR, updatedAt: now() })
           : this.db.collection('exercises').doc(x.id).delete()));
@@ -272,10 +279,20 @@
     },
     async _list(c, mine) {
       try {
-        let q = this.db.collection(c);
-        if (mine) q = q.where('ownerId', '==', this.user.uid);
-        const snap = await q.get();
-        return snap.docs.map((d) => Object.assign({ id: d.id }, d.data()));
+        if (!mine) return (await this.db.collection(c).get()).docs.map((d) => Object.assign({ id: d.id }, d.data()));
+        // i miei documenti: quelli che ho creato e quelli condivisi con me
+        const col = this.db.collection(c), me = this.user.uid;
+        const [own, shared] = await Promise.all([col.where('ownerId', '==', me).get(), col.where('members', 'array-contains', me).get()
+          .catch((e) => { console.warn('condivisione non attiva (regole da aggiornare?)', e); return { docs: [] }; })]);
+        const out = {};
+        own.docs.concat(shared.docs).forEach((d) => { out[d.id] = Object.assign({ id: d.id }, d.data()); });
+        // documenti creati prima della condivisione: aggiungo l'elenco dei membri
+        Object.values(out).filter((d) => !d.members && d.ownerId === me).forEach((d) => {
+          const patch = c === 'teams' ? { members: [me], memberNames: { [me]: this.user.username } } : { members: [me] };
+          Object.assign(d, patch);
+          col.doc(d.id).update(patch).catch((e) => console.warn('aggiornamento membri', e));
+        });
+        return Object.values(out);
       } catch (e) { throw fbMessage(e); }
     },
     async _save(c, doc, ownerField) {
@@ -285,6 +302,7 @@
           d.createdAt = now();
           if (ownerField === 'authorId') { d.authorId = this.user.uid; d.authorName = this.user.name || this.user.username; }
           else d.ownerId = this.user.uid;
+          if (c === 'teams') { d.members = [this.user.uid]; d.memberNames = { [this.user.uid]: this.user.username }; }
           d.updatedAt = now();
           const ref = this.db.collection(c).doc();
           d.id = ref.id;
@@ -310,7 +328,45 @@
       await this._delete('teams', id);
     },
     listSessions() { return this._list('sessions', true); },
-    saveSession(s) { return this._save('sessions', s, 'ownerId'); },
+    async _team(id) {
+      if (!id) return null;
+      try { const d = await this.db.collection('teams').doc(id).get(); return d.exists ? d.data() : null; } catch (e) { return null; }
+    },
+    async saveSession(s) {
+      // gli allenamenti li vedono tutti gli allenatori della squadra (le regole controllano che l'elenco coincida)
+      const team = await this._team(s.teamId);
+      const d = Object.assign({}, s, { updatedByName: this.user.name || this.user.username });
+      d.members = team && team.members ? team.members : [d.ownerId || this.user.uid];
+      return this._save('sessions', d, 'ownerId');
+    },
+    async _syncSessions(teamId, team, members) {
+      const ss = (await this.listSessions()).filter((x) => x.teamId === teamId);
+      // gli allenamenti creati da chi esce passano a chi ha creato la squadra
+      await Promise.all(ss.map((x) => this.db.collection('sessions').doc(x.id)
+        .update(members.includes(x.ownerId) ? { members } : { members, ownerId: team.ownerId })));
+    },
+    async inviteToTeam(teamId, username) {
+      const u = normUser(username).replace(/^@/, '');
+      let d;
+      try { d = await this.db.collection('usernames').doc(u).get(); } catch (e) { throw fbMessage(e); }
+      if (!u || !d.exists) throw new AppError('Non troviamo nessun allenatore con questo nome utente. Controlla come l\'ha scritto nel suo profilo.');
+      const other = d.data().uid;
+      const team = await this._team(teamId);
+      if ((team.members || []).includes(other)) throw new AppError('Questo allenatore fa già parte della squadra.');
+      const members = (team.members || [this.user.uid]).concat(other);
+      try {
+        await this.db.collection('teams').doc(teamId).update({ members, ['memberNames.' + other]: u, updatedAt: now() });
+        await this._syncSessions(teamId, team, members);
+      } catch (e) { throw fbMessage(e); }
+    },
+    async removeFromTeam(teamId, who) {
+      const team = await this._team(teamId);
+      const members = (team.members || []).filter((x) => x !== who);
+      try {
+        await this.db.collection('teams').doc(teamId).update({ members, ['memberNames.' + who]: firebase.firestore.FieldValue.delete() });
+        await this._syncSessions(teamId, team, members);
+      } catch (e) { throw fbMessage(e); }
+    },
     deleteSession(id) { return this._delete('sessions', id); },
   };
 
