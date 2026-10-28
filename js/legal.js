@@ -4,7 +4,8 @@
   const L = window.TUKIKI_LEGAL || {};
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const v = (k) => (L[k] ? esc(L[k]) : '<mark>[da completare]</mark>');
-  const mail = () => (L.email ? `<a href="mailto:${esc(L.email)}">${esc(L.email)}</a>` : v('email'));
+  // senza email si indica la sede: per legge basta un recapito
+  const mail = () => (L.email ? `<a href="mailto:${esc(L.email)}">${esc(L.email)}</a>` : `${esc(L.nome || 'l\'associazione')}, ${v('sede')}`);
   const fmt = (iso) => { try { return new Date(iso + 'T12:00:00').toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return iso; } };
 
   function privacy() {
@@ -14,7 +15,7 @@
       <p>Questa pagina spiega, in modo semplice, quali dati usa Coach Tukiki, perché e quali sono i tuoi diritti (Regolamento europeo 2016/679, "GDPR").</p>
 
       <h2>1. Chi è responsabile dei dati</h2>
-      <p>Il titolare del trattamento è <b>${v('nome')}</b>, con sede in ${v('sede')}, codice fiscale ${v('codiceFiscale')}.<br>
+      <p>Il titolare del trattamento è <b>${v('nome')}</b>, con sede in ${v('sede')}${L.codiceFiscale ? `, codice fiscale ${esc(L.codiceFiscale)}` : ''}.<br>
       Per qualsiasi domanda o richiesta sulla privacy scrivi a ${mail()}.</p>
 
       <h2>2. Quali dati usiamo</h2>
@@ -31,7 +32,7 @@
         <li><b>non scrivere mai informazioni sulla salute</b> (diagnosi, disabilità, terapie, certificati medici) né altre informazioni delicate;</li>
         <li>non inserire dati di persone negli esercizi condivisi, che sono visibili a tutti gli allenatori.</li>
       </ul>
-      <p>Se nelle note compaiono comunque dati di atleti, l'associazione li tratta solo per organizzare l'attività sportiva, alle stesse condizioni dell'informativa già consegnata alle famiglie al momento dell'iscrizione.</p>
+      <p>Se nelle note compaiono comunque dati di atleti, l'associazione li tratta solo per organizzare l'attività sportiva, secondo l'informativa privacy che l'associazione fornisce alle famiglie al momento dell'iscrizione.</p>
 
       <h2>4. Perché usiamo i dati</h2>
       <ul>
