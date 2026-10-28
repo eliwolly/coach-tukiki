@@ -1,4 +1,7 @@
 /* Tukiki Allenamenti — stile ispirato al brand Tukiki */
+/* Caratteri inclusi nel sito (licenza SIL Open Font License): nessuna richiesta ai server di Google */
+@font-face { font-family: "Fredoka"; font-style: normal; font-weight: 300 700; font-display: swap; src: url(../fonts/fredoka.woff2) format("woff2"); }
+@font-face { font-family: "Work Sans"; font-style: normal; font-weight: 100 900; font-display: swap; src: url(../fonts/work-sans.woff2) format("woff2"); }
 :root {
   --cream: #F7F2E9;
   --cream-2: #EFE7D8;
@@ -347,3 +350,18 @@ a.chip { text-decoration: none; }
 .pdf-preview { background: #fff; border-radius: var(--radius-sm); padding: 14px; box-shadow: var(--shadow); }
 .pdf-preview .pdf-page { width: 100%; }
 @media (max-width: 600px) { .pdf-preview .pdf-ex { grid-template-columns: 1fr; gap: 8px; } }
+
+/* privacy e condizioni */
+label.check { display: flex; gap: 10px; align-items: flex-start; margin: 4px 0 16px; font-size: .92rem; cursor: pointer; }
+label.check input { width: 22px; height: 22px; flex: none; margin: 1px 0 0; accent-color: var(--green-dark); }
+.legal-links { text-align: center; margin-top: 18px; }
+.privacy-hint { margin: -6px 0 14px; }
+.legal h2 { font-size: 1.1rem; margin-top: 1.4em; }
+.legal ul { padding-left: 1.2em; margin: 0 0 .8em; }
+.legal li { margin-bottom: .4em; }
+.legal mark { background: #FFE9A8; padding: 0 3px; border-radius: 4px; }
+
+/* allenatori della squadra */
+.coaches .coach { padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: nowrap; }
+.coaches .coach em { font-style: normal; }
+.avatar.sm { width: 32px; height: 32px; font-size: .78rem; flex: none; }
