@@ -63,5 +63,19 @@ service cloud.firestore {
       allow create: if signedIn() && request.resource.data.ownerId == request.auth.uid && validMembers()
                     && request.auth.uid in request.resource.data.members;
     }
+
+    // Allenamenti pubblici: copia senza note che un allenatore della squadra sceglie di mostrare a tutti.
+    // Il documento ha lo stesso id dell'allenamento; pubblica o toglie chi può già vedere quell'allenamento.
+    function canPublish(id) {
+      let p = /databases/$(database)/documents/sessions/$(id);
+      return exists(p) && member(get(p).data);
+    }
+    match /publicSessions/{id} {
+      allow read: if signedIn();
+      allow create, update: if signedIn() && request.resource.data.ownerId == request.auth.uid
+                    && request.resource.data.sessionId == id && canPublish(id)
+                    && !('notes' in request.resource.data);
+      allow delete: if signedIn() && (resource.data.ownerId == request.auth.uid || canPublish(id));
+    }
   }
 }
