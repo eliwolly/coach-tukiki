@@ -81,13 +81,15 @@
     },
     async exportData() {
       const p = Object.assign({}, ls.get('tk_users', {})[this.user.uid]); delete p.pw;
-      return { profilo: p, squadre: await this.listTeams(), allenamenti: await this.listSessions(), esercizi: (await this.listExercises()).filter((e) => e.authorId === this.user.uid) };
+      return { profilo: p, squadre: await this.listTeams(), allenamenti: await this.listSessions(), esercizi: (await this.listExercises()).filter((e) => e.authorId === this.user.uid),
+        allenamentiPubblicati: (await this.listPublicSessions()).filter((x) => x.ownerId === this.user.uid) };
     },
     async deleteAccount({ password, keepExercises }) {
       const users = ls.get('tk_users', {}); const rec = users[this.user.uid];
       if (!rec || rec.pw !== await hash(password)) throw new AppError('La password non è corretta.');
       const me = this.user.uid;
       Object.values(this._all('sessions')).filter((x) => x.ownerId === me).forEach((x) => this._del('sessions', x.id));
+      Object.values(this._all('publicSessions')).filter((x) => x.ownerId === me).forEach((x) => this._del('publicSessions', x.id));
       Object.values(this._all('teams')).filter((x) => x.ownerId === me).forEach((x) => this._del('teams', x.id));
       Object.values(this._all('exercises')).filter((x) => x.authorId === me).forEach((x) => {
         if (keepExercises) this._put('exercises', Object.assign({}, x, { authorName: ANON_AUTHOR })); else this._del('exercises', x.id);
@@ -116,7 +118,7 @@
     },
     async deleteTeam(id) {
       this._del('teams', id);
-      Object.values(this._all('sessions')).filter((s) => s.teamId === id && s.ownerId === this.user.uid).forEach((s) => this._del('sessions', s.id));
+      Object.values(this._all('sessions')).filter((s) => s.teamId === id && s.ownerId === this.user.uid).forEach((s) => { this._del('publicSessions', s.id); this._del('sessions', s.id); });
     },
     async listSessions() { return Object.values(this._all('sessions')).filter((s) => this._isMine(s)); },
     async saveSession(s) {
@@ -127,7 +129,13 @@
       doc.updatedAt = now(); doc.updatedByName = this.user.name || this.user.username;
       return this._put('sessions', doc);
     },
-    async deleteSession(id) { this._del('sessions', id); },
+    async deleteSession(id) { this._del('publicSessions', id); this._del('sessions', id); },
+    async listPublicSessions() { return Object.values(this._all('publicSessions')); },
+    async publishSession(id, data) {
+      const old = this._all('publicSessions')[id];
+      return this._put('publicSessions', Object.assign({}, data, { id, ownerId: this.user.uid, authorName: this.user.name || this.user.username, publishedAt: (old && old.publishedAt) || now(), updatedAt: now() }));
+    },
+    async unpublishSession(id) { this._del('publicSessions', id); },
     async inviteToTeam() { throw new AppError('Nella versione di prova non si possono invitare altri allenatori.'); },
     async removeFromTeam() { throw new AppError('Nella versione di prova non si possono condividere le squadre.'); },
   };
@@ -247,8 +255,9 @@
     async exportData() {
       let p = {};
       try { const d = await this.db.collection('users').doc(this.user.uid).get(); p = d.exists ? d.data() : {}; } catch (e) { throw fbMessage(e); }
-      const [squadre, allenamenti, esercizi] = await Promise.all([this.listTeams(), this.listSessions(), this._mine('exercises', 'authorId')]);
-      return { profilo: p, squadre, allenamenti, esercizi };
+      const [squadre, allenamenti, esercizi, allenamentiPubblicati] = await Promise.all([this.listTeams(), this.listSessions(), this._mine('exercises', 'authorId'),
+        this._mine('publicSessions', 'ownerId').catch(() => [])]);
+      return { profilo: p, squadre, allenamenti, esercizi, allenamentiPubblicati };
     },
     async _mine(c, field) {
       try {
@@ -269,6 +278,9 @@
         for (const t of ts) { if (t.ownerId === me) await this.deleteTeam(t.id); else await this.removeFromTeam(t.id, me); }
         const handled = new Set(ts.map((t) => t.id));
         await Promise.all(ss.filter((x) => !handled.has(x.teamId) && x.ownerId === me).map((x) => this.db.collection('sessions').doc(x.id).delete()));
+        // gli allenamenti che ho pubblicato spariscono dalla pagina di tutti
+        const pubs = await this._mine('publicSessions', 'ownerId').catch(() => []);
+        await Promise.all(pubs.map((x) => this.db.collection('publicSessions').doc(x.id).delete()));
         await Promise.all(exs.map((x) => keepExercises
           ? this.db.collection('exercises').doc(x.id).update({ authorName: ANON_AUTHOR, updatedAt: now() })
           : this.db.collection('exercises').doc(x.id).delete()));
@@ -324,7 +336,7 @@
     saveTeam(t) { return this._save('teams', t, 'ownerId'); },
     async deleteTeam(id) {
       const ss = (await this.listSessions()).filter((s) => s.teamId === id);
-      for (const s of ss) await this._delete('sessions', s.id);
+      for (const s of ss) await this.deleteSession(s.id);
       await this._delete('teams', id);
     },
     listSessions() { return this._list('sessions', true); },
@@ -367,7 +379,28 @@
         await this._syncSessions(teamId, team, members);
       } catch (e) { throw fbMessage(e); }
     },
-    deleteSession(id) { return this._delete('sessions', id); },
+    async deleteSession(id) {
+      // prima si toglie la copia pubblica: le regole controllano che l'allenamento esista ancora
+      try { await this.db.collection('publicSessions').doc(id).delete(); } catch (e) { /* non era pubblico */ }
+      return this._delete('sessions', id);
+    },
+    async listPublicSessions() {
+      try { return (await this.db.collection('publicSessions').get()).docs.map((d) => Object.assign({ id: d.id }, d.data())); } catch (e) { throw fbMessage(e); }
+    },
+    async publishSession(id, data) {
+      const ref = this.db.collection('publicSessions').doc(id);
+      const d = Object.assign({}, data, { ownerId: this.user.uid, authorName: this.user.name || this.user.username, updatedAt: now() });
+      delete d.id;
+      try {
+        // la data di pubblicazione resta quella della prima volta
+        this._pubAt = this._pubAt || {};
+        if (!this._pubAt[id]) { const old = await ref.get().catch(() => null); this._pubAt[id] = old && old.exists && old.data().publishedAt ? old.data().publishedAt : now(); }
+        d.publishedAt = this._pubAt[id];
+        await ref.set(JSON.parse(JSON.stringify(d)));
+      } catch (e) { throw fbMessage(e); }
+      return Object.assign({ id }, d);
+    },
+    async unpublishSession(id) { return this._delete('publicSessions', id); },
   };
 
   const cfg = window.TUKIKI_FIREBASE_CONFIG;

@@ -55,7 +55,7 @@
   function errText(e) { return e instanceof window.AppError ? e.message : 'Qualcosa non ha funzionato. Riprova.'; }
 
   /* ---------- Cache dei dati ---------- */
-  const cache = { exercises: null, teams: null, sessions: null };
+  const cache = { exercises: null, teams: null, sessions: null, publics: null };
   async function exercises() {
     if (!cache.exercises) {
       const mine = await S.listExercises();
@@ -65,11 +65,27 @@
   }
   async function teams() { if (!cache.teams) cache.teams = (await S.listTeams()).sort((a, b) => a.name.localeCompare(b.name)); return cache.teams; }
   async function sessions() { if (!cache.sessions) cache.sessions = (await S.listSessions()).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.createdAt || '').localeCompare(a.createdAt || '')); return cache.sessions; }
+  // allenamenti pubblicati da tutti gli allenatori; se il database non risponde la pagina resta vuota
+  async function publics() {
+    if (!cache.publics) {
+      try { cache.publics = (await S.listPublicSessions()).sort((a, b) => (b.date || '').localeCompare(a.date || '') || (b.publishedAt || '').localeCompare(a.publishedAt || '')); }
+      catch (e) { console.warn('allenamenti pubblici non disponibili', e); return []; }
+    }
+    return cache.publics;
+  }
   const invalidate = (...k) => k.forEach((x) => { cache[x] = null; });
   const exById = async (id) => (await exercises()).find((e) => e.id === id);
   // copia dell'esercizio dentro l'allenamento, così lo storico resta leggibile anche se l'esercizio viene cancellato
   const snap = (e) => ({ title: e.title, goal: e.goal, difficulty: e.difficulty, description: e.description || '', steps: e.steps || [], equipment: e.equipment || '', diagram: e.diagram });
   const sessionMinutes = (s) => (s.blocks || []).reduce((t, b) => t + (+b.duration || 0), 0);
+  // copia pubblica di un allenamento: senza note, che possono contenere i nomi dei ragazzi
+  const publicCopy = (s, team, exFor) => ({
+    sessionId: s.id, teamId: s.teamId || '', teamName: team ? team.name : '', date: s.date || '', title: s.title || '', focus: s.focus || '',
+    minutes: sessionMinutes(s),
+    blocks: (s.blocks || []).map((b) => b.kind === 'text'
+      ? { kind: 'text', title: b.title || '', text: b.text || '', duration: +b.duration || 0, goal: b.goal || '' }
+      : { exerciseId: b.exerciseId, duration: +b.duration || 0, snapshot: snap(exFor(b)) }),
+  });
 
   /* ---------- Router ---------- */
   const routes = [];
@@ -105,7 +121,7 @@
     const nav = $('#bottomnav'), top = $('#topbar-user');
     nav.classList.toggle('hidden', !S.user);
     top.innerHTML = S.user ? `<a class="avatar" href="#/profilo" aria-label="Il mio profilo">${esc(initials(S.user.name || S.user.username))}</a>` : '';
-    const sec = path.startsWith('/esercizi') ? 'esercizi' : path.startsWith('/allenament') ? 'allenamenti' : path.startsWith('/squadr') ? 'squadre' : path === '/' ? 'home' : '';
+    const sec = path.startsWith('/esercizi') ? 'esercizi' : (path.startsWith('/allenament') || path.startsWith('/pubblico')) ? 'allenamenti' : path.startsWith('/squadr') ? 'squadre' : path === '/' ? 'home' : '';
     $$('#bottomnav a').forEach((a) => a.classList.toggle('active', a.dataset.sec === sec));
   }
   window.addEventListener('hashchange', render);
@@ -138,7 +154,7 @@
       ev.preventDefault();
       try { await S.acceptTerms(Legal.version); render(); } catch (e) { UI.alert(errText(e)); }
     };
-    $('#out').onclick = async () => { await S.signOut(); invalidate('exercises', 'teams', 'sessions'); location.hash = '#/accedi'; };
+    $('#out').onclick = async () => { await S.signOut(); invalidate('exercises', 'teams', 'sessions', 'publics'); location.hash = '#/accedi'; };
   }
 
   /* ================= ACCESSO ================= */
@@ -183,7 +199,7 @@
             signingUp = true;
             try { await S.signUp({ name: f.name.value, username: f.user.value, email: f.email.value, password: f.pw.value, termsVersion: Legal.version }); } finally { signingUp = false; }
           }
-          invalidate('exercises', 'teams', 'sessions');
+          invalidate('exercises', 'teams', 'sessions', 'publics');
           if (location.hash === '#/') render(); else location.hash = '#/';
         } catch (e) { draw(errText(e)); }
       };
@@ -200,7 +216,8 @@
 
   /* ================= HOME ================= */
   route(/^\/$/, async () => {
-    const [ss, ts, exs] = await Promise.all([sessions(), teams(), exercises()]);
+    const [ss, ts, exs, ps] = await Promise.all([sessions(), teams(), exercises(), publics()]);
+    const others = ps.filter((p) => p.ownerId !== S.user.uid && !ss.some((x) => x.id === p.id)).slice(0, 3);
     const name = (S.user.name || S.user.username).split(' ')[0];
     const today = todayISO();
     const todays = ss.filter((s) => s.date === today);
@@ -224,6 +241,8 @@
       <div class="section-title"><h2>Esplora gli esercizi</h2><a href="#/esercizi">Tutti</a></div>
       <div class="chips">${GOALS.map((g) => `<a class="chip" href="#/esercizi?obiettivo=${g.k}"><span class="dot" style="background:${g.color}"></span>${g.label}</a>`).join('')}</div>
 
+      ${others.length ? `<div class="section-title"><h2>Allenamenti degli altri mister</h2><a href="#/allenamenti?vista=tutti">Vedi tutti</a></div>${others.map(publicItem).join('')}` : ''}
+
       ${community.length ? `<div class="section-title"><h2>Nuovi dagli allenatori</h2></div><div class="ex-list">${community.map(exCard).join('')}</div>` : ''}
     `;
   });
@@ -233,7 +252,15 @@
     const n = (s.blocks || []).length;
     return `<a class="list-item" href="#/allenamento/${s.id}">
       <div class="ico">${d.d}<small>${esc(d.m)}</small></div>
-      <div class="grow"><div class="t">${esc(s.title || 'Allenamento')}</div><div class="s">${esc(teamName)} · ${n} eserciz${n === 1 ? 'io' : 'i'} · ${sessionMinutes(s)} min</div></div>
+      <div class="grow"><div class="t">${esc(s.title || 'Allenamento')}${s.public ? ' <span class="tag pub">Pubblico</span>' : ''}</div><div class="s">${esc(teamName)} · ${n} eserciz${n === 1 ? 'io' : 'i'} · ${sessionMinutes(s)} min</div></div>
+      ${I.chev}</a>`;
+  }
+  function publicItem(p) {
+    const d = fmtShort(p.date);
+    const n = (p.blocks || []).length;
+    return `<a class="list-item" href="#/pubblico/${esc(p.id)}">
+      <div class="ico">${d.d}<small>${esc(d.m)}</small></div>
+      <div class="grow"><div class="t">${esc(p.title || 'Allenamento')}</div><div class="s">${esc(p.teamName || 'Senza squadra')} · ${esc(p.authorName || 'un allenatore')} · ${n} eserciz${n === 1 ? 'io' : 'i'} · ${+p.minutes || 0} min</div></div>
       ${I.chev}</a>`;
   }
 
@@ -488,11 +515,16 @@
   });
 
   /* ================= ALLENAMENTI ================= */
-  route(/^\/allenamenti$/, async () => {
+  route(/^\/allenamenti$/, async (m, q) => {
+    const all = q.get('vista') === 'tutti';
+    const head = `
+      <div class="row between" style="margin-bottom:12px"><h1 style="margin:0">Allenamenti</h1><a class="btn green small" href="#/allenamento/nuovo">${I.plus} Nuovo</a></div>
+      <div class="tabs"><button type="button" class="${all ? '' : 'on'}" data-vista="">I miei</button><button type="button" class="${all ? 'on' : ''}" data-vista="tutti">Di tutti</button></div>`;
+    const bindTabs = () => $$('[data-vista]').forEach((b) => b.onclick = () => { location.hash = b.dataset.vista ? '#/allenamenti?vista=tutti' : '#/allenamenti'; });
+    if (all) { await publicList(head); bindTabs(); return; }
     const [ss, ts] = await Promise.all([sessions(), teams()]);
     let team = '';
-    app.innerHTML = `
-      <div class="row between" style="margin-bottom:12px"><h1 style="margin:0">Allenamenti</h1><a class="btn green small" href="#/allenamento/nuovo">${I.plus} Nuovo</a></div>
+    app.innerHTML = `${head}
       ${ts.length > 1 ? `<div class="chips"><button type="button" class="chip on" data-team="">Tutte le squadre</button>${ts.map((t) => `<button type="button" class="chip" data-team="${t.id}">${esc(t.name)}</button>`).join('')}</div>` : ''}
       <div id="list" style="margin-top:8px"></div>`;
     const draw = () => {
@@ -501,7 +533,80 @@
       $('#list').innerHTML = list.length ? list.map((s) => sessionItem(s, tn(s.teamId))).join('') : '<div class="empty">Ancora nessun allenamento.<br><a class="btn green" href="#/allenamento/nuovo">Prepara il primo</a></div>';
     };
     $$('[data-team]').forEach((b) => b.onclick = () => { team = b.dataset.team; $$('[data-team]').forEach((x) => x.classList.toggle('on', x === b)); draw(); });
+    bindTabs();
     draw();
+  });
+
+  // la pagina di tutti: allenamenti che gli allenatori hanno scelto di rendere pubblici
+  async function publicList(head) {
+    invalidate('publics');
+    const ps = await publics();
+    const teamNames = [...new Set(ps.map((p) => p.teamName).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+    const months = [...new Set(ps.map((p) => (p.date || '').slice(0, 7)).filter(Boolean))].sort().reverse();
+    const monthLabel = (ym) => { const d = new Date(ym + '-15T12:00:00'); const t = d.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }); return t.charAt(0).toUpperCase() + t.slice(1); };
+    const f = { team: '', month: '', text: '' };
+    app.innerHTML = `${head}
+      <p class="small muted" style="margin-top:0">Gli allenamenti che i mister Tukiki hanno scelto di condividere. Aprili per vedere gli esercizi, scaricare il PDF o copiarli tra i tuoi.</p>
+      <div class="searchbox">${I.search}<input type="search" id="pq" placeholder="Cerca per titolo, esercizio o mister" aria-label="Cerca"></div>
+      <div class="grid2" style="margin-top:10px">
+        <label class="field" style="margin:0"><span>Squadra</span><select id="pteam"><option value="">Tutte</option>${teamNames.map((t) => `<option>${esc(t)}</option>`).join('')}</select></label>
+        <label class="field" style="margin:0"><span>Mese</span><select id="pmonth"><option value="">Tutti</option>${months.map((x) => `<option value="${x}">${esc(monthLabel(x))}</option>`).join('')}</select></label>
+      </div>
+      <div id="list" style="margin-top:14px"></div>`;
+    const norm = (x) => String(x || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const draw = () => {
+      const words = norm(f.text).split(/\s+/).filter(Boolean);
+      const list = ps.filter((p) => (!f.team || p.teamName === f.team) && (!f.month || (p.date || '').startsWith(f.month)) && (!words.length || (() => {
+        const hay = norm([p.title, p.focus, p.authorName, p.teamName].concat((p.blocks || []).map((b) => b.kind === 'text' ? b.title : (b.snapshot || {}).title)).join(' '));
+        return words.every((w) => hay.includes(w));
+      })()));
+      $('#list').innerHTML = list.length ? list.map(publicItem).join('')
+        : `<div class="empty">${ps.length ? 'Nessun allenamento con questi filtri.' : 'Nessun mister ha ancora condiviso un allenamento.<br>Apri uno dei tuoi e scegli "Rendi pubblico".'}</div>`;
+    };
+    $('#pq').oninput = (ev) => { f.text = ev.target.value; draw(); };
+    $('#pteam').onchange = (ev) => { f.team = ev.target.value; draw(); };
+    $('#pmonth').onchange = (ev) => { f.month = ev.target.value; draw(); };
+    draw();
+  }
+
+  route(/^\/pubblico\/([^/]+)$/, async (m) => {
+    const p = (await publics()).find((x) => x.id === m[1]);
+    if (!p) { app.innerHTML = `<a class="backlink" href="#/allenamenti?vista=tutti">${I.back} Indietro</a><div class="empty">Questo allenamento non è più pubblico.</div>`; return; }
+    const mine = (await sessions()).some((x) => x.id === p.id);
+    const exFor = (b) => b.kind === 'text' ? { title: b.title, description: b.text, goal: b.goal, free: true } : (b.snapshot || { title: 'Esercizio', diagram: { field: 'free', items: [] } });
+    const blocks = p.blocks || [];
+    app.innerHTML = `
+      <a class="backlink" href="#/allenamenti?vista=tutti">${I.back} Allenamenti di tutti</a>
+      <div class="detail-head">
+        <h1>${esc(p.title || 'Allenamento')}</h1>
+        <p class="muted small">${esc(p.teamName || 'Senza squadra')} · ${esc(fmtDate(p.date))}<br>Preparato da <b>${esc(p.authorName || 'un allenatore')}</b></p>
+      </div>
+      ${p.focus ? `<div class="card flat"><h3>Obiettivo</h3><p style="margin:0">${esc(p.focus)}</p></div>` : ''}
+      <div class="section-title"><h2>Esercizi</h2><span class="small muted">${blocks.length} · ${+p.minutes || 0} min</span></div>
+      ${blocks.length ? blocks.map((b, i) => {
+        const e = exFor(b);
+        const steps = Array.isArray(e.steps) ? e.steps : String(e.steps || '').split('\n').filter((x) => x.trim());
+        return `<div class="card pub-block">
+          <div class="block-head">
+            <div class="block-num">${i + 1}</div>
+            <div class="grow">
+              ${b.exerciseId ? `<a href="#/esercizio/${esc(b.exerciseId)}" style="color:inherit;text-decoration:none"><b>${esc(e.title)}</b></a>` : `<b>${esc(e.title || 'Esercizio')}</b>`}
+              <div style="margin-top:4px" class="row">${e.goal ? goalTag(e.goal) : ''}<span class="tag">${+b.duration || 0} min</span></div>
+            </div>
+          </div>
+          ${e.free ? '' : window.Pitch.render(e.diagram)}
+          ${e.description ? `<p style="white-space:pre-line">${esc(e.description)}</p>` : ''}
+          ${steps.length ? `<ol class="steps">${steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
+        </div>`;
+      }).join('') : '<div class="empty">Nessun esercizio.</div>'}
+      <div class="stack" style="margin-top:16px">
+        <a class="btn green block" href="#/allenamento/nuovo?pubblico=${esc(p.id)}">${I.copy} Copia nei miei allenamenti</a>
+        <div class="row">
+          <button type="button" class="btn light grow" id="pdf">${I.pdf} Scarica PDF</button>
+          ${mine ? `<a class="btn light grow" href="#/allenamento/${esc(p.id)}">Apri il mio</a>` : ''}
+        </div>
+      </div>`;
+    $('#pdf').onclick = () => exportPDF(p, { name: p.teamName }, exFor, p.authorName);
   });
 
   route(/^\/allenamento\/([^/]+)$/, async (m, q) => {
@@ -511,7 +616,12 @@
       const copy = q.get('copia') && ss.find((x) => x.id === q.get('copia'));
       s = copy ? Object.assign(JSON.parse(JSON.stringify(copy)), { id: undefined, date: todayISO(), notes: '', createdAt: undefined }) :
         { title: '', teamId: q.get('squadra') || (ts[0] && ts[0].id) || '', date: todayISO(), focus: '', blocks: [], notes: '' };
-      if (copy) delete s.id;
+      if (copy) { delete s.id; delete s.public; }
+      const pub = q.get('pubblico') && (await publics()).find((x) => x.id === q.get('pubblico'));
+      if (pub) {
+        s.title = pub.title || ''; s.focus = pub.focus || '';
+        s.blocks = JSON.parse(JSON.stringify(pub.blocks || [])).map((b) => Object.assign(b, { note: '' }));
+      }
       const exId = q.get('esercizio');
       if (exId) { const e = exs.find((x) => x.id === exId); if (e) s.blocks.push({ exerciseId: e.id, duration: +e.duration || 10, note: '', snapshot: snap(e) }); }
     } else {
@@ -533,6 +643,7 @@
         const wasNew = !s.id;
         s.id = saved.id; s.createdAt = saved.createdAt; s.ownerId = saved.ownerId;
         invalidate('sessions');
+        if (s.public) { await S.publishSession(s.id, publicCopy(s, ts.find((t) => t.id === s.teamId), exFor)); invalidate('publics'); }
         if (wasNew && location.hash.startsWith('#/allenamento/nuovo')) history.replaceState(null, '', '#/allenamento/' + s.id);
         status('Salvato ✓');
       } catch (e) { status('Non salvato'); toast(errText(e)); }
@@ -607,6 +718,11 @@
         <label class="field" style="margin:0"><span>Obiettivo di oggi <em>(facoltativo)</em></span><input id="focus" type="text" value="${esc(s.focus || '')}" placeholder="Es. migliorare i passaggi corti"></label>
       </div>
 
+      <label class="card flat pub-toggle${ts.length ? '' : ' off'}">
+        <input type="checkbox" id="public" ${s.public ? 'checked' : ''} ${ts.length ? '' : 'disabled'}>
+        <span><b>Rendi pubblico</b><br><span class="small muted" id="pubhint">${s.public ? 'Lo vedono tutti i mister Tukiki nella pagina "Di tutti". Le note restano private.' : 'Solo tu e gli allenatori della squadra lo vedete.'}</span></span>
+      </label>
+
       <div class="section-title"><h2>Esercizi</h2></div>
       <div id="blocks"></div>
       <button type="button" class="btn light block" id="add">${I.plus} Aggiungi esercizio dalla libreria</button>
@@ -659,6 +775,18 @@
       } finally { btn.disabled = false; btn.innerHTML = old; }
     };
     $('#pdf').onclick = () => exportPDF(s, ts.find((t) => t.id === s.teamId), exFor);
+    const pubBox = $('#public');
+    pubBox.onchange = async () => {
+      const on = pubBox.checked;
+      if (on && !await UI.confirm('Rendere pubblico questo allenamento? Lo vedranno tutti i mister Tukiki registrati, con il tuo nome, la squadra e la data. Le note non vengono mai pubblicate.', 'Rendi pubblico')) { pubBox.checked = false; return; }
+      s.public = on;
+      $('#pubhint').textContent = on ? 'Lo vedono tutti i mister Tukiki nella pagina "Di tutti". Le note restano private.' : 'Solo tu e gli allenatori della squadra lo vedete.';
+      clearTimeout(saveTimer); dirty = false;
+      saving = saving.then(doSave);
+      await saving;
+      if (!on && s.id) { try { await S.unpublishSession(s.id); invalidate('publics'); } catch (e) { toast(errText(e)); } }
+      toast(on ? 'Allenamento pubblicato' : 'Ora è di nuovo privato');
+    };
     const del = $('#del');
     if (del) del.onclick = async () => {
       if (!await UI.confirm('Eliminare questo allenamento?', 'Elimina', true)) return;
@@ -740,12 +868,12 @@
   }
 
   /* ================= PDF ================= */
-  function pdfHTML(s, team, exFor) {
+  function pdfHTML(s, team, exFor, mister) {
     const blocks = s.blocks || [];
     return `<div class="pdf-page">
       <div class="pdf-head"><img src="img/logo.png" alt="Tukiki"><div class="r"><b>${esc(team ? team.name : '')}</b><br>${esc(fmtDate(s.date))}</div></div>
       <h1 class="pdf-title">${esc(s.title || 'Allenamento')}</h1>
-      <div class="pdf-meta">${blocks.length} eserciz${blocks.length === 1 ? 'io' : 'i'} · durata totale ${sessionMinutes(s)} minuti${s.focus ? ' · Obiettivo: ' + esc(s.focus) : ''} · Mister: ${esc(S.user.name || S.user.username)}</div>
+      <div class="pdf-meta">${blocks.length} eserciz${blocks.length === 1 ? 'io' : 'i'} · durata totale ${sessionMinutes(s)} minuti${s.focus ? ' · Obiettivo: ' + esc(s.focus) : ''} · Mister: ${esc(mister || S.user.name || S.user.username)}</div>
       ${blocks.map((b, i) => {
         const e = exFor(b);
         const steps = Array.isArray(e.steps) ? e.steps : String(e.steps || '').split('\n').filter(Boolean);
@@ -797,10 +925,10 @@
       img.src = url;
     })));
   }
-  async function exportPDF(s, team, exFor) {
+  async function exportPDF(s, team, exFor, mister) {
     if (!(s.blocks || []).length) { toast('Aggiungi almeno un esercizio'); return; }
     const root = $('#print-root');
-    root.innerHTML = pdfHTML(s, team, exFor);
+    root.innerHTML = pdfHTML(s, team, exFor, mister);
     // dentro l'anteprima (pagina incorporata) il browser blocca i download: mostriamo il PDF a schermo
     let embedded = false; try { embedded = window.self !== window.top; } catch (e) { embedded = true; }
     if (embedded) {
@@ -881,14 +1009,14 @@
         const btn = $('button[type=submit]', f); btn.disabled = true; btn.textContent = 'Un momento…';
         try {
           await S.deleteAccount({ password: f.pw.value, keepExercises: !!(f.keep && f.keep.checked) });
-          close(); invalidate('exercises', 'teams', 'sessions');
+          close(); invalidate('exercises', 'teams', 'sessions', 'publics');
           location.hash = '#/accedi';
           UI.alert('Il tuo account è stato eliminato. Grazie per aver allenato con noi!');
         } catch (e) { btn.disabled = false; btn.textContent = 'Elimina per sempre'; UI.alert(errText(e)); }
       };
     });
     $('#pf').onsubmit = async (ev) => { ev.preventDefault(); try { await S.updateProfile({ name: ev.target.name.value.trim() }); toast('Salvato!'); render(); } catch (e) { UI.alert(errText(e)); } };
-    $('#out').onclick = async () => { await S.signOut(); invalidate('exercises', 'teams', 'sessions'); location.hash = '#/accedi'; };
+    $('#out').onclick = async () => { await S.signOut(); invalidate('exercises', 'teams', 'sessions', 'publics'); location.hash = '#/accedi'; };
   });
 
   /* ---------- Avvio ---------- */
@@ -901,7 +1029,7 @@
     let lastUid = S.user ? S.user.uid : null, lastTerms = S.user ? S.user.termsVersion : null;
     S.onAuth((u) => {
       const id = u ? u.uid : null, terms = u ? u.termsVersion : null;
-      if (id !== lastUid) { lastUid = id; lastTerms = terms; invalidate('exercises', 'teams', 'sessions'); render(); }
+      if (id !== lastUid) { lastUid = id; lastTerms = terms; invalidate('exercises', 'teams', 'sessions', 'publics'); render(); }
       else if (terms !== lastTerms) { lastTerms = terms; render(); }
     });
     render();

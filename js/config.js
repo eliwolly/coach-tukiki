@@ -18,5 +18,5 @@ window.TUKIKI_LEGAL = {
   sede: "Via Nino Oxilia 20, Milano", // indirizzo della sede legale
   codiceFiscale: "",            // codice fiscale dell'associazione
   email: "segreteria.tukiki@gmail.com", // email per le richieste sulla privacy
-  versione: "2026-10-25"        // cambiarla quando si modificano i testi: agli allenatori verrà chiesto di rileggerli
+  versione: "2026-11-04"        // cambiarla quando si modificano i testi: agli allenatori verrà chiesto di rileggerli
 };
